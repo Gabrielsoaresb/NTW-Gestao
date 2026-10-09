@@ -2,6 +2,8 @@ from flask import (
     Flask, request, redirect, url_for, render_template_string,
     session, flash, get_flashed_messages
 )
+import re
+from flask_wtf.csrf import CSRFProtect, generate_csrf
 import sqlite3
 import os
 from datetime import datetime, timedelta
@@ -14,6 +16,8 @@ app = Flask(__name__)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 BANCO = os.path.join(BASE_DIR, "estetica.db")
 app.secret_key = os.environ["SECRET_KEY"]
+app.config["WTF_CSRF_ENABLED"] = True
+csrf = CSRFProtect(app)
 
 APP_NOME = "NTW Gestão"
 APP_SUBTITULO = "Gestão Automotiva"
@@ -213,7 +217,7 @@ body.menu-fechado .sidebar{width:76px}body.menu-fechado .conteudo{margin-left:76
 .main{max-width:1500px;padding:28px}.titulo-pagina{margin:0 0 5px;font-size:28px}.subtitulo{color:var(--muted);margin:0 0 24px}
 .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:15px;margin-bottom:25px}.card{background:#fff;border:1px solid var(--border);border-radius:14px;padding:20px}.card-topo{display:flex;align-items:center;justify-content:space-between;margin-bottom:15px}.card-icone{width:38px;height:38px;border-radius:10px;display:grid;place-items:center;background:#eef6ff}.card-label{color:var(--muted);font-size:13px;font-weight:600}.card-valor{margin:0;font-size:26px;font-weight:800}.painel{background:#fff;border:1px solid var(--border);border-radius:14px;padding:20px;margin-bottom:20px}.painel h3{margin:0 0 16px}
 .botao{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:40px;background:var(--dark);color:#fff;border:0;border-radius:8px;padding:10px 14px;text-decoration:none;cursor:pointer;font-weight:650}.botao.azul{background:var(--blue)}.botao.verde{background:var(--green)}.botao.vermelho{background:var(--red)}.botao.cinza{background:#64748b}.botao.amarelo{background:#ca8a04}.acoes{display:flex;flex-wrap:wrap;gap:8px;margin:15px 0}
-form{background:#fff;border:1px solid var(--border);border-radius:14px;padding:22px;max-width:900px}label{display:block;font-weight:650;font-size:14px;margin:14px 0 7px}input,select,textarea{width:100%;padding:11px 12px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;font-size:15px}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 18px}.item{background:#fff;border:1px solid var(--border);border-radius:12px;padding:17px;margin-bottom:10px}.item h3{margin:0 0 8px}.item p{margin:6px 0;color:#475569}.badge{display:inline-block;border-radius:999px;padding:5px 9px;color:#fff;font-size:12px;font-weight:700}.badge.azul{background:var(--blue)}.badge.verde{background:var(--green)}.badge.vermelho{background:var(--red)}.badge.laranja{background:var(--orange)}.badge.cinza{background:#64748b}
+.form-acao{display:inline-flex!important;padding:0!important;border:0!important;background:transparent!important;margin:0!important;max-width:none!important}form{background:#fff;border:1px solid var(--border);border-radius:14px;padding:22px;max-width:900px}label{display:block;font-weight:650;font-size:14px;margin:14px 0 7px}input,select,textarea{width:100%;padding:11px 12px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;font-size:15px}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 18px}.item{background:#fff;border:1px solid var(--border);border-radius:12px;padding:17px;margin-bottom:10px}.item h3{margin:0 0 8px}.item p{margin:6px 0;color:#475569}.badge{display:inline-block;border-radius:999px;padding:5px 9px;color:#fff;font-size:12px;font-weight:700}.badge.azul{background:var(--blue)}.badge.verde{background:var(--green)}.badge.vermelho{background:var(--red)}.badge.laranja{background:var(--orange)}.badge.cinza{background:#64748b}
 .flash{padding:12px 14px;border-radius:9px;margin-bottom:18px;background:#eff6ff;border:1px solid #bfdbfe;color:#1e40af}.flash.erro{background:#fef2f2;border-color:#fecaca;color:#991b1b}.flash.ok{background:#f0fdf4;border-color:#bbf7d0;color:#166534}.seletor form{max-width:430px;display:flex;gap:8px;align-items:end;margin-bottom:20px}.positivo{color:#15803d}.negativo{color:#b91c1c}.muted{color:var(--muted)}
 .login-page{min-height:100vh;display:grid;place-items:center;padding:20px;background:linear-gradient(135deg,#fff 0%,#eaf7ff 100%)}.login-box{width:100%;max-width:410px;background:#fff;border:1px solid var(--border);border-radius:18px;padding:30px;box-shadow:0 12px 38px rgba(15,23,42,.08)}.login-box form{border:0;padding:0}.login-logo{width:58px;height:58px;border-radius:16px;background:var(--sidebar);color:var(--dark);display:grid;place-items:center;font-size:24px;margin:0 auto 18px}.login-box h1,.login-box p{text-align:center}.login-box p{color:var(--muted)}
 .overlay{display:none}
@@ -253,6 +257,42 @@ def menu_item(url, icone, texto, p=None):
         return ""
     return f'<a class="nav-link" href="{url}" title="{texto}"><i class="{icone}"></i><span>{texto}</span></a>'
 
+
+
+# Converte links que alteram dados em formulários POST protegidos.
+# Não modifica links de navegação nem formulários GET.
+ACAO_POST = re.compile(
+    r"^/(?:cliente/\d+/excluir|veiculo/\d+/excluir|"
+    r"servico/\d+/(?:excluir|pagar|status/[^/]+)|"
+    r"retorno/\d+/concluir|despesa/\d+/excluir|"
+    r"funcionario/\d+/excluir|funcionario/pagamento/\d+/excluir|"
+    r"usuario/\d+/excluir)$"
+)
+
+
+def proteger_formularios(html):
+    def converter_link(m):
+        classe, url, attrs, conteudo = m.group("classe", "url", "attrs", "conteudo")
+        if not ACAO_POST.fullmatch(url.split("?", 1)[0]):
+            return m.group(0)
+        confirmacao = re.search(r'onclick="([^"]*)"', attrs)
+        onclick = f' onclick="{confirmacao.group(1)}"' if confirmacao else ""
+        return (f'<form action="{url}" method="POST" class="form-acao">'
+                f'<button type="submit" class="botao {classe}"{onclick}>{conteudo}</button>'
+                '</form>')
+
+    html = re.sub(
+        r'<a class="botao (?P<classe>[^"]+)" href="(?P<url>[^"]+)"(?P<attrs>[^>]*)>(?P<conteudo>.*?)</a>',
+        converter_link, html, flags=re.DOTALL
+    )
+
+    def adicionar_token(m):
+        tag = m.group(0)
+        if re.search(r'method\s*=\s*["\']?post\b', tag, re.IGNORECASE):
+            return tag + f'<input type="hidden" name="csrf_token" value="{generate_csrf()}">'
+        return tag
+
+    return re.sub(r'<form\b[^>]*>', adicionar_token, html, flags=re.IGNORECASE)
 
 def pagina(titulo, conteudo):
     mensagens = "".join(
@@ -309,7 +349,7 @@ def pagina(titulo, conteudo):
 {JS}
 </body>
 </html>'''
-    return render_template_string(template)
+    return render_template_string(proteger_formularios(template))
 
 
 def card(icone, label, valor, classe=""):
@@ -333,7 +373,7 @@ def login():
         flash("Usuário ou senha inválidos.", "erro")
 
     mensagens = "".join(f'<div class="flash {c}">{e(m)}</div>' for c, m in get_flashed_messages(with_categories=True))
-    return render_template_string(f'''<!doctype html><html lang="pt-br"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Entrar · {APP_NOME}</title><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">{CSS}</head><body><div class="login-page"><div class="login-box"><div class="login-logo"><i class="fa-solid fa-car-side"></i></div><h1>{APP_NOME}</h1><p>{APP_SUBTITULO}</p>{mensagens}<form method="post"><label>Usuário</label><input name="usuario" required autofocus><label>Senha</label><input type="password" name="senha" required><button class="botao azul" style="width:100%;margin-top:18px"><i class="fa-solid fa-right-to-bracket"></i> Entrar</button></form></div></div></body></html>''')
+    return render_template_string(proteger_formularios(f'''<!doctype html><html lang="pt-br"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Entrar · {APP_NOME}</title><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">{CSS}</head><body><div class="login-page"><div class="login-box"><div class="login-logo"><i class="fa-solid fa-car-side"></i></div><h1>{APP_NOME}</h1><p>{APP_SUBTITULO}</p>{mensagens}<form method="post"><label>Usuário</label><input name="usuario" required autofocus><label>Senha</label><input type="password" name="senha" required><button class="botao azul" style="width:100%;margin-top:18px"><i class="fa-solid fa-right-to-bracket"></i> Entrar</button></form></div></div></body></html>'''))
 
 
 @app.route("/logout")
@@ -429,7 +469,7 @@ def editar_cliente(id):
     con.close(); return pagina("Editar cliente", html)
 
 
-@app.route("/cliente/<int:id>/excluir")
+@app.route("/cliente/<int:id>/excluir", methods=["POST"])
 @permissao("clientes")
 def excluir_cliente(id):
     con = conectar()
@@ -482,7 +522,7 @@ def editar_veiculo(id):
     con.close(); return pagina("Editar veículo", html)
 
 
-@app.route("/veiculo/<int:id>/excluir")
+@app.route("/veiculo/<int:id>/excluir", methods=["POST"])
 @permissao("veiculos")
 def excluir_veiculo(id):
     con = conectar(); con.execute("DELETE FROM servicos WHERE veiculo_id=?", (id,)); con.execute("DELETE FROM veiculos WHERE id=?", (id,)); con.commit(); con.close(); flash("Veículo e serviços relacionados foram excluídos.", "ok"); return redirect(url_for("veiculos"))
@@ -525,20 +565,20 @@ def agenda():
     return pagina("Agenda", html)
 
 
-@app.route("/servico/<int:id>/status/<status>")
+@app.route("/servico/<int:id>/status/<status>", methods=["POST"])
 @permissao("agenda")
 def mudar_status(id, status):
     if status not in ["Agendado", "Em andamento", "Finalizado", "Cancelado"]: return redirect(url_for("agenda"))
     con = conectar(); con.execute("UPDATE servicos SET status=? WHERE id=?", (status, id)); con.commit(); con.close(); return redirect(url_for("agenda"))
 
 
-@app.route("/servico/<int:id>/pagar")
+@app.route("/servico/<int:id>/pagar", methods=["POST"])
 @permissao("financeiro")
 def pagar_servico(id):
     con = conectar(); con.execute("UPDATE servicos SET status_pagamento='Pago',data_pagamento=? WHERE id=?", (datetime.now().strftime("%Y-%m-%d"), id)); con.commit(); con.close(); flash("Pagamento marcado como pago.", "ok"); return redirect(url_for("agenda"))
 
 
-@app.route("/servico/<int:id>/excluir")
+@app.route("/servico/<int:id>/excluir", methods=["POST"])
 @permissao("servicos")
 def excluir_servico(id):
     con = conectar(); con.execute("DELETE FROM servicos WHERE id=?", (id,)); con.commit(); con.close(); flash("Serviço excluído.", "ok"); return redirect(url_for("agenda"))
@@ -562,7 +602,7 @@ def retornos():
     return pagina("Retornos", html)
 
 
-@app.route("/retorno/<int:id>/concluir")
+@app.route("/retorno/<int:id>/concluir", methods=["POST"])
 @permissao("retornos")
 def concluir_retorno(id):
     con = conectar(); con.execute("UPDATE servicos SET retorno_realizado=1 WHERE id=?", (id,)); con.commit(); con.close(); flash("Retorno marcado como contatado.", "ok"); return redirect(url_for("retornos"))
@@ -603,7 +643,7 @@ def nova_despesa():
     return pagina("Nova despesa", f'''<h2 class="titulo-pagina">Nova despesa</h2><form method="post"><label>Descrição</label><input name="descricao" required><label>Categoria</label><select name="categoria"><option>Produtos</option><option>Aluguel</option><option>Água</option><option>Energia</option><option>Marketing</option><option>Fornecedor</option><option>Manutenção</option><option>Outros</option></select><label>Valor</label><input name="valor" required><label>Data</label><input type="date" name="data_despesa" value="{hoje}" required><label>Status</label><select name="status"><option>Pago</option><option>Pendente</option></select><button class="botao vermelho" style="margin-top:18px"><i class="fa-solid fa-floppy-disk"></i> Salvar</button></form>''')
 
 
-@app.route("/despesa/<int:id>/excluir")
+@app.route("/despesa/<int:id>/excluir", methods=["POST"])
 @permissao("despesas")
 def excluir_despesa(id):
     con = conectar(); con.execute("DELETE FROM despesas WHERE id=?", (id,)); con.commit(); con.close(); flash("Despesa excluída.", "ok"); return redirect(url_for("despesas"))
@@ -641,7 +681,7 @@ def novo_funcionario():
     return pagina("Novo funcionário", f'''<h2 class="titulo-pagina">Novo funcionário</h2><form method="post"><label>Nome</label><input name="nome" required><label>Telefone</label><input name="telefone"><label>Cargo</label><select name="cargo">{ops}</select><label>Tipo de comissão</label><select name="tipo_comissao"><option>Percentual</option><option>Valor por carro</option></select><label>Comissão</label><input name="comissao" required><button class="botao azul" style="margin-top:18px"><i class="fa-solid fa-floppy-disk"></i> Salvar</button></form>''')
 
 
-@app.route("/funcionario/<int:id>/excluir")
+@app.route("/funcionario/<int:id>/excluir", methods=["POST"])
 @login_obrigatorio
 def excluir_funcionario(id):
     if session.get("cargo") not in ("Administrador", "Gerente"):
@@ -659,7 +699,7 @@ def pagamento_funcionario():
     return pagina("Pagamento", f'''<h2 class="titulo-pagina">Pagamento de funcionário</h2><form method="post"><label>Funcionário</label><select name="funcionario_id">{ops}</select><label>Valor</label><input name="valor" required><label>Data</label><input type="date" name="data_pagamento" value="{hoje}" required><label>Observação</label><textarea name="observacao"></textarea><button class="botao verde" style="margin-top:18px"><i class="fa-solid fa-floppy-disk"></i> Registrar</button></form>''')
 
 
-@app.route("/funcionario/pagamento/<int:id>/excluir")
+@app.route("/funcionario/pagamento/<int:id>/excluir", methods=["POST"])
 @permissao("financeiro")
 def excluir_pagamento_funcionario(id):
     con = conectar(); con.execute("DELETE FROM pagamentos_funcionarios WHERE id=?", (id,)); con.commit(); con.close(); flash("Pagamento excluído.", "ok"); return redirect(url_for("funcionarios"))
@@ -694,7 +734,7 @@ def novo_usuario():
     return pagina("Novo usuário", f'''<h2 class="titulo-pagina">Novo usuário</h2><p class="subtitulo">O cargo define o painel e o menu.</p><form method="post"><label>Nome</label><input name="nome" required><label>Usuário</label><input name="usuario" required><label>Senha</label><input type="password" name="senha" required><label>Cargo</label><select name="cargo">{ops}</select><button class="botao azul" style="margin-top:18px"><i class="fa-solid fa-user-shield"></i> Criar usuário</button></form>''')
 
 
-@app.route("/usuario/<int:id>/excluir")
+@app.route("/usuario/<int:id>/excluir", methods=["POST"])
 @permissao("usuarios")
 def excluir_usuario(id):
     if id == session.get("usuario_id"):
